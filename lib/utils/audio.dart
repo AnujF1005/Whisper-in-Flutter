@@ -15,8 +15,8 @@ class AudioProperties {
 }
 
 double calculateAudioDuration(
-    int byteLength, int sampleRate, int numChannels, int bitDepth) {
-  int bytesPerSample = bitDepth ~/ 8; // Convert bits to bytes
+    int byteLength, int sampleRate, int numChannels, int bitsPerSample) {
+  int bytesPerSample = bitsPerSample ~/ 8; // Convert bits to bytes
   int bytesPerSecond = sampleRate * numChannels * bytesPerSample;
   return byteLength / bytesPerSecond;
 }
