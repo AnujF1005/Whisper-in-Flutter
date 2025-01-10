@@ -1,11 +1,9 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:typed_data';
+import 'package:assistant/services/transcription.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:path_provider/path_provider.dart';
-import 'package:assistant/services/whisper_service.dart';
 import 'package:assistant/utils/audio.dart';
 
 class MicButton extends StatefulWidget {
@@ -16,21 +14,18 @@ class MicButton extends StatefulWidget {
 class _MicButtonState extends State<MicButton> {
   bool isPressed = false;
   bool isLoading = false;
-  String recognizedText = "Press the button and speak";
-  final WhisperService _whisperService = WhisperService();
+  String _recognizedText = "";
   FlutterSoundRecorder? _recorder;
   StreamController<Uint8List> _recordingDataController = StreamController();
   StreamSubscription? _recorderSubscription;
-  String? _filePath;
-  List<int> _audioBytes = [];
-  int _transcribedIndex = 0;
-  Timer? timer;
   ScrollController _scrollController = ScrollController();
   final AudioProperties _audioProperties = AudioProperties(
     sampleRate: 16000,
     numChannels: 1,
     bitsPerSample: 16,
   );
+  TranscriptionService? _transcriptionService;
+  StreamSubscription<String>? _transcriptionSubscription;
 
   @override
   void initState() {
@@ -42,20 +37,24 @@ class _MicButtonState extends State<MicButton> {
   Future<void> _initializeRecorder() async {
     await _recorder!.openRecorder();
     await Permission.microphone.request();
-    final directory = await getApplicationDocumentsDirectory();
-    _filePath = '${directory.path}/recording.wav';
+
+    _transcriptionService = TranscriptionService(_audioProperties);
 
     _recorderSubscription = _recordingDataController.stream.listen((buffer) {
-      _audioBytes.addAll(buffer);
+      _transcriptionService!.processAudioData(buffer);
     });
-  }
+    _transcriptionSubscription =
+        _transcriptionService!.recognizedTextStream.listen((recognizedText) {
+      setState(() {
+        _recognizedText += ' $recognizedText';
+      });
 
-  Future<IOSink> createFile() async {
-    var outputFile = File(_filePath!);
-    if (outputFile.existsSync()) {
-      await outputFile.delete();
-    }
-    return outputFile.openWrite();
+      _scrollController.animateTo(
+        _scrollController.position.maxScrollExtent,
+        duration: Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    });
   }
 
   void _startRecording() async {
@@ -72,73 +71,12 @@ class _MicButtonState extends State<MicButton> {
           _audioProperties.sampleRate *
           _audioProperties.numChannels,
     );
-
-    _startPeriodicTranscription();
   }
 
   void _stopRecording() async {
-    _stopPeriodicTranscription();
     await _recorder!.stopRecorder();
     _recorderSubscription?.pause();
-    _transcribeAudio();
-  }
-
-  void _startPeriodicTranscription() {
-    timer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      _transcribeAudio();
-    });
-  }
-
-  void _stopPeriodicTranscription() {
-    timer?.cancel();
-  }
-
-  Future<void> _transcribeAudio() async {
-    setState(() {
-      isLoading = true;
-    });
-    try {
-      // Check size of _audioBytes to ensure that it is not empty or too small
-      if (_audioBytes.isEmpty ||
-          calculateAudioDuration(
-                  _audioBytes.length,
-                  _audioProperties.sampleRate,
-                  _audioProperties.numChannels,
-                  _audioProperties.bitsPerSample) <
-              5) {
-        print('No audio data recorded');
-        return;
-      }
-      // Convert collected audio bytes to Uint8List and write them to an MP3 file.
-      final int lastIndex = _audioBytes.length - 1;
-      Uint8List audioData =
-          Uint8List.fromList(_audioBytes.sublist(_transcribedIndex, lastIndex));
-      _audioBytes = _audioBytes.sublist(lastIndex + 1);
-      _transcribedIndex = 0;
-      final file = File(_filePath!);
-      List<int> wavData = addWavHeader(audioData, _audioProperties.sampleRate,
-          _audioProperties.numChannels, _audioProperties.bitsPerSample);
-      file.writeAsBytesSync(wavData);
-
-      final text = await _whisperService.transcribeAudio(_filePath!);
-      setState(() {
-        recognizedText += ' $text';
-      });
-    } catch (e) {
-      setState(() {
-        recognizedText += '\n\nError: ${e.toString()}';
-      });
-    } finally {
-      // Scroll to the bottom of the SingleChildScrollView
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-      setState(() {
-        isLoading = false;
-      });
-    }
+    _transcriptionService!.transcribeRemaining();
   }
 
   void _toggleButton() async {
@@ -156,10 +94,12 @@ class _MicButtonState extends State<MicButton> {
   @override
   void dispose() {
     _recorder!.closeRecorder();
-    _stopPeriodicTranscription();
     _recorder = null;
     _recorderSubscription?.cancel();
     _scrollController.dispose();
+    _transcriptionSubscription?.cancel();
+    _transcriptionService?.dispose();
+    _recordingDataController.close();
     super.dispose();
   }
 
@@ -188,6 +128,13 @@ class _MicButtonState extends State<MicButton> {
           ),
         ),
         const SizedBox(height: 30),
+        Text(
+          isPressed ? "Recording..." : "Press the mic to start recording",
+          style: const TextStyle(
+              fontSize: 16, fontWeight: FontWeight.bold, color: Colors.red),
+          textAlign: TextAlign.left, // left-aligned text
+        ),
+        const SizedBox(height: 30),
         Container(
           width: screenWidth * 0.8, // 80% of screen width
           height: screenHeight * 0.5, // 50% of screen height
@@ -202,7 +149,7 @@ class _MicButtonState extends State<MicButton> {
               SingleChildScrollView(
                 controller: _scrollController,
                 child: Text(
-                  recognizedText,
+                  _recognizedText,
                   style: const TextStyle(
                       fontSize: 16, fontWeight: FontWeight.bold),
                   textAlign: TextAlign.left, // left-aligned text
