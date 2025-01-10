@@ -6,14 +6,7 @@ import 'package:flutter_sound/flutter_sound.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:assistant/services/whisper_service.dart';
-import 'package:http/http.dart' as http;
-
-double calculateAudioDuration(
-    int byteLength, int sampleRate, int numChannels, int bitDepth) {
-  int bytesPerSample = bitDepth ~/ 8; // Convert bits to bytes
-  int bytesPerSecond = sampleRate * numChannels * bytesPerSample;
-  return byteLength / bytesPerSecond;
-}
+import 'package:assistant/utils/audio.dart';
 
 class MicButton extends StatefulWidget {
   @override
@@ -33,6 +26,11 @@ class _MicButtonState extends State<MicButton> {
   int _transcribedIndex = 0;
   Timer? timer;
   ScrollController _scrollController = ScrollController();
+  final AudioProperties _audioProperties = AudioProperties(
+    sampleRate: 16000,
+    numChannels: 1,
+    bitsPerSample: 16,
+  );
 
   @override
   void initState() {
@@ -68,7 +66,11 @@ class _MicButtonState extends State<MicButton> {
     await _recorder!.startRecorder(
       toStream: _recordingDataController.sink,
       codec: Codec.pcm16,
-      numChannels: 1,
+      numChannels: _audioProperties.numChannels,
+      sampleRate: _audioProperties.sampleRate,
+      bitRate: _audioProperties.bitsPerSample *
+          _audioProperties.sampleRate *
+          _audioProperties.numChannels,
     );
 
     _startPeriodicTranscription();
@@ -98,7 +100,12 @@ class _MicButtonState extends State<MicButton> {
     try {
       // Check size of _audioBytes to ensure that it is not empty or too small
       if (_audioBytes.isEmpty ||
-          calculateAudioDuration(_audioBytes.length, 16000, 1, 16) < 5) {
+          calculateAudioDuration(
+                  _audioBytes.length,
+                  _audioProperties.sampleRate,
+                  _audioProperties.numChannels,
+                  _audioProperties.bitsPerSample) <
+              5) {
         print('No audio data recorded');
         return;
       }
@@ -109,7 +116,8 @@ class _MicButtonState extends State<MicButton> {
       _audioBytes = _audioBytes.sublist(lastIndex + 1);
       _transcribedIndex = 0;
       final file = File(_filePath!);
-      List<int> wavData = _addWavHeader(audioData);
+      List<int> wavData = addWavHeader(audioData, _audioProperties.sampleRate,
+          _audioProperties.numChannels, _audioProperties.bitsPerSample);
       file.writeAsBytesSync(wavData);
 
       final text = await _whisperService.transcribeAudio(_filePath!);
@@ -143,53 +151,6 @@ class _MicButtonState extends State<MicButton> {
     setState(() {
       isPressed = !isPressed;
     });
-  }
-
-  /// Generate WAV Header for PCM Data
-  List<int> _addWavHeader(Uint8List audioData) {
-    const int sampleRate = 16000;
-    const int numChannels = 1;
-    const int bitsPerSample = 16;
-    const int byteRate = sampleRate * numChannels * (bitsPerSample ~/ 8);
-    const int blockAlign = numChannels * (bitsPerSample ~/ 8);
-
-    int dataLength = audioData.length;
-    int totalFileSize = dataLength + 44; // Header size = 44 bytes
-
-    // WAV Header Structure (Little Endian)
-    var header = <int>[
-      // RIFF Header
-      ...'RIFF'.codeUnits, // Chunk ID
-      totalFileSize & 0xFF,
-      (totalFileSize >> 8) & 0xFF,
-      (totalFileSize >> 16) & 0xFF,
-      (totalFileSize >> 24) & 0xFF, // Chunk Size
-      ...'WAVE'.codeUnits, // Format
-      // fmt Subchunk
-      ...'fmt '.codeUnits, // Subchunk1 ID
-      16, 0, 0, 0, // Subchunk1 Size (16 for PCM)
-      1, 0, // Audio Format (PCM)
-      numChannels, 0, // NumChannels
-      sampleRate & 0xFF,
-      (sampleRate >> 8) & 0xFF,
-      (sampleRate >> 16) & 0xFF,
-      (sampleRate >> 24) & 0xFF, // SampleRate
-      byteRate & 0xFF,
-      (byteRate >> 8) & 0xFF,
-      (byteRate >> 16) & 0xFF,
-      (byteRate >> 24) & 0xFF, // ByteRate
-      blockAlign, 0, // BlockAlign
-      bitsPerSample, 0, // BitsPerSample
-      // Data Subchunk
-      ...'data'.codeUnits, // Subchunk2 ID
-      dataLength & 0xFF,
-      (dataLength >> 8) & 0xFF,
-      (dataLength >> 16) & 0xFF,
-      (dataLength >> 24) & 0xFF, // Subchunk2 Size
-    ];
-
-    // Return header + PCM data combined
-    return [...header, ...audioData];
   }
 
   @override
