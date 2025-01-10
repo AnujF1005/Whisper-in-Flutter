@@ -1,16 +1,9 @@
-# assistant
+# Live Assistant
 
-A new Flutter project.
+A assistant which listens to all your conversations and keep track of what happened throught the day. You can recall everything by asking assistant about it. Assistant will remember everything for you.
 
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Features Added
+- Transcription Service which uses OpenAI-Whisper API
+- Proper chunking of audio sequence recorded to send to Whisper API
+- Removal of silent parts from audio
+- Screen to show microphone button and transcribed text
