@@ -1,6 +1,6 @@
-# Live Assistant
+# Whisper API Demo
 
-A assistant which listens to all your conversations and keep track of what happened throught the day. You can recall everything by asking assistant about it. Assistant will remember everything for you.
+Sample flutter app to record your conversations and transcribe them using Whisper API.
 
 ## Features Added
 - Transcription Service which uses OpenAI-Whisper API
