@@ -77,6 +77,9 @@ class TranscriptionService {
                   audioProperties.numChannels *
                   audioProperties.bitsPerSample ~/
                   8)) {
+        print("=========== In TranscriptionService::transcribeAudio ===========");
+        print("File length is less than the expected length");
+        print("=========== In TranscriptionService::transcribeAudio ===========");
         return;
       }
 
