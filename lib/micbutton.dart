@@ -74,9 +74,19 @@ class _MicButtonState extends State<MicButton> {
   }
 
   void _stopRecording() async {
+    setState(() {
+      isLoading = true;
+    });
     await _recorder!.stopRecorder();
     _recorderSubscription?.pause();
     _transcriptionService!.transcribeRemaining();
+    // Wait for the 'Processing started' message
+    _transcriptionSubscription = _transcriptionService!.recognizedTextStream.listen((recognizedText) {
+      setState(() {
+        _recognizedText = recognizedText;
+        isLoading = false;
+      });
+    });
   }
 
   void _toggleButton() async {

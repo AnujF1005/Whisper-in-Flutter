@@ -2,20 +2,21 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
-import 'package:assistant/services/whisper_service.dart';
 import 'package:assistant/utils/audio.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:ffmpeg_kit_flutter/ffmpeg_kit.dart';
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
+
+// Add backend URL at the top
+const String backendUrl = 'http://10.0.2.2:8000/transcribe'; // TODO: Replace with your backend URL // For Android emulator, use 10.0.2.2 instead of 127.0.0.1 to access your host machine.
 
 class TranscriptionService {
   final List<int> _audioBytesBuffer = [];
-  final double _audioChunkDurationInSec = 30;
   final AudioProperties audioProperties;
   late Directory _appDir;
   late String _filePath;
-  final WhisperService _whisperService = WhisperService();
-  final StreamController<String> _recognizedTextController =
-      StreamController<String>();
+  final StreamController<String> _recognizedTextController = StreamController<String>.broadcast();
 
   TranscriptionService(this.audioProperties) {
     _initialize();
@@ -28,65 +29,43 @@ class TranscriptionService {
     _filePath = '${_appDir.path}/recording.wav';
   }
 
-  void transcribeRemaining() {
+  void transcribeRemaining() async {
     double bufferDuration = calculateAudioDuration(
         _audioBytesBuffer.length,
         audioProperties.sampleRate,
         audioProperties.numChannels,
         audioProperties.bitsPerSample);
     if (_audioBytesBuffer.isNotEmpty && bufferDuration > 0.01) {
-      _transcribeAudio(Uint8List.fromList(_audioBytesBuffer));
+      await _uploadAudioToBackend(Uint8List.fromList(_audioBytesBuffer));
     }
     _audioBytesBuffer.clear();
   }
 
   void processAudioData(Uint8List audioData) {
     _audioBytesBuffer.addAll(audioData);
-    double bufferDuration = calculateAudioDuration(
-        _audioBytesBuffer.length,
-        audioProperties.sampleRate,
-        audioProperties.numChannels,
-        audioProperties.bitsPerSample);
-    if (bufferDuration >= _audioChunkDurationInSec) {
-      int lastIndex = _audioBytesBuffer.length - 1;
-      final chunk = _audioBytesBuffer.sublist(0, lastIndex);
-      _audioBytesBuffer.clear();
-      _transcribeAudio(Uint8List.fromList(chunk));
-    }
   }
 
-  void _transcribeAudio(Uint8List audioData) async {
+  Future<void> _uploadAudioToBackend(Uint8List audioData) async {
     try {
       final file = File(_filePath);
       List<int> wavData = addWavHeader(audioData, audioProperties.sampleRate,
           audioProperties.numChannels, audioProperties.bitsPerSample);
       file.writeAsBytesSync(wavData);
 
-      // Use ffmpeg to remove silence
-      // get folder path for the file _filePath and append _nosilence.wav to it
-
-      final outputFilePath = '${_appDir.path}/recording_nosilence.wav';
-      await FFmpegKit.execute(
-          '-fflags +discardcorrupt -y -i $_filePath -ar ${audioProperties.sampleRate} -af silenceremove=start_periods=1:stop_periods=-1:start_threshold=-30dB:stop_threshold=-30dB:start_silence=2:stop_silence=2 $outputFilePath');
-
-      // Get duration of audio in seconds. (Note: WAV file has 44 bytes header + 0.1 seconds of audio data)
-      if (File(outputFilePath).lengthSync() <
-          (44 +
-              0.1 *
-                  audioProperties.sampleRate *
-                  audioProperties.numChannels *
-                  audioProperties.bitsPerSample ~/
-                  8)) {
-        print("=========== In TranscriptionService::transcribeAudio ===========");
-        print("File length is less than the expected length");
-        print("=========== In TranscriptionService::transcribeAudio ===========");
-        return;
+      final now = DateTime.now().toIso8601String();
+      var request = http.MultipartRequest('POST', Uri.parse(backendUrl))
+        ..fields['start_timestamp'] = now
+        ..files.add(await http.MultipartFile.fromPath('audio', file.path));
+      final response = await request.send();
+      final responseBody = await response.stream.bytesToString();
+      if (response.statusCode == 200) {
+        _recognizedTextController.add('Processing started.');
+      } else {
+        _recognizedTextController.add('Failed to upload: $responseBody');
       }
-
-      final text = await _whisperService.transcribeAudio(outputFilePath);
-      _recognizedTextController.add(text);
     } catch (e) {
-      _recognizedTextController.add('\n\nError: ${e.toString()}');
+      _recognizedTextController.add('\n\nError:  [31m${e.toString()}\u001b[0m');
+      print(e);
     }
   }
 

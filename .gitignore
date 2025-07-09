@@ -45,3 +45,6 @@ app.*.map.json
 
 # .env file
 assets/.env
+
+# Other files
+personal_assistant_server
